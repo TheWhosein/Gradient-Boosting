@@ -1,0 +1,54 @@
+import numpy as np, pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+#Sintetik data
+rng = np.random.default_rng(42)
+n = 365
+dates = pd.date_range("2023-01-01", periods=n, freq="D")
+price = np.clip(rng.normal(12, 1.2, n), 8, 18)
+promo = rng.binomial(1, 0.25, n)
+stockout = rng.binomial(1, 0.05, n)
+temp = rng.normal(18, 8, n)
+weekday = dates.weekday
+month = dates.month
+is_weekend = (weekday >= 5).astype(int)
+
+trend = np.linspace(0, 25, n)
+season = 12*np.sin(2*np.pi*np.arange(n)/7) + 8*np.sin(2*np.pi*np.arange(n)/30)
+noise = rng.normal(0, 7, n)
+sales = 120 + trend + season - 5*(price-12) + 22*promo - 20*stockout + 0.7*temp - 4*is_weekend + noise
+sales = np.maximum(0, np.round(sales)).astype(int)
+
+df = pd.DataFrame({
+    "date": dates, "price": price, "promo": promo, "stockout": stockout,
+    "temp": temp, "weekday": weekday, "month": month, "is_weekend": is_weekend,
+    "sales": sales
+})
+
+#Train və test
+test_days = 60
+train, test = df.iloc[:-test_days], df.iloc[-test_days:]
+features = ["price","promo","stockout","temp","weekday","month","is_weekend"]
+Xtr, ytr = train[features], train["sales"]
+Xte, yte = test[features], test["sales"]
+
+#Gradient Boosting modeli
+gbr = GradientBoostingRegressor(
+    n_estimators=300, learning_rate=0.05, max_depth=3, subsample=0.8, random_state=42
+).fit(Xtr, ytr)
+
+#Qiymətləndirmə
+pred = gbr.predict(Xte)
+mae  = mean_absolute_error(yte, pred)
+rmse = mean_squared_error(yte, pred, squared=False)
+r2   = r2_score(yte, pred)
+print(f"MAE={mae:.1f} | RMSE={rmse:.1f} | R2={r2:.3f}")
+
+#Qısa what-if (son gün üçün)
+last = test.iloc[[-1]][features].copy()
+base = gbr.predict(last)[0]
+last_promo = last.copy(); last_promo["promo"] = 1
+last_price_down = last.copy(); last_price_down["price"] = last["price"] - 1.0
+print("Promo aç → Δ satış:", gbr.predict(last_promo)[0] - base)
+print("Qiyməti -1 → Δ satış:", gbr.predict(last_price_down)[0] - base)
